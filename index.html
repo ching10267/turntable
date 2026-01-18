@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>決定轉盤 Decision Wheel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        morandi: {
+                            bg: '#F9F8F6',
+                            text: '#4A4A4A',
+                            sub: '#9CA3AF',
+                            accent: '#8E9EAB',
+                            1: '#E4C1C1',
+                            2: '#B8C6C3',
+                            3: '#DBC7A8',
+                            4: '#C6B8B8',
+                            5: '#BCC4CC',
+                            6: '#D4C4B7',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['"Noto Sans TC"', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        'soft': '0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #F9F8F6;
+            color: #4A4A4A;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+        
+        .scale-enter-active, .scale-leave-active { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .scale-enter-from, .scale-leave-to { transform: scale(0.8); opacity: 0; }
+
+        .list-enter-active, .list-leave-active { transition: all 0.4s ease; }
+        .list-enter-from, .list-leave-to { opacity: 0; transform: translateY(10px); }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex justify-center items-center bg-morandi-bg font-sans">
+
+    <div id="app" class="relative w-full max-w-md h-full flex flex-col bg-white/50 sm:rounded-[40px] sm:h-[90vh] sm:shadow-soft sm:border sm:border-white overflow-hidden">
+        
+        <!-- 頂部標題區 -->
+        <header class="flex-none pt-8 pb-4 px-6 text-center z-10 transition-all duration-500">
+            <!-- 靜態標題 (非旋轉時) -->
+            <div v-if="!isSpinning" class="transition-all duration-500">
+                <h1 class="text-xl font-medium tracking-widest text-morandi-text opacity-80 uppercase">Decision</h1>
+                <p class="text-xs text-gray-400 mt-1 tracking-widest">WHAT TO DO NEXT?</p>
+            </div>
+            <!-- 動態顯示自定義標題 (旋轉時) -->
+            <div v-else class="transform scale-125 transition-all duration-700">
+                <h2 class="text-2xl font-bold text-morandi-accent tracking-wider">{{ wheelTitle || '正在決定...' }}</h2>
+            </div>
+        </header>
+
+        <!-- 主要內容區 (轉盤) -->
+        <main class="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+            <div class="relative w-[300px] h-[300px] transition-all duration-700" 
+                 :class="{'opacity-30 blur-sm': showResultModal, 'scale-110': isSpinning}">
+                
+                <div class="absolute -top-3 left-1/2 transform -translate-x-1/2 z-20">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" class="drop-shadow-md text-morandi-text">
+                        <path d="M12 21L5 9H19L12 21Z" fill="currentColor"/>
+                    </svg>
+                </div>
+
+                <div class="w-full h-full rounded-full shadow-soft bg-white p-2">
+                    <div class="w-full h-full rounded-full overflow-hidden relative"
+                         :style="{ transform: `rotate(${rotation}deg)`, transition: isSpinning ? 'transform 5s cubic-bezier(0.25, 0.1, 0.25, 1)' : 'none' }">
+                        
+                        <div v-if="items.length === 0" class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-300 text-sm tracking-widest uppercase">
+                            Empty
+                        </div>
+
+                        <div v-else-if="items.length === 1" class="w-full h-full flex items-center justify-center" :style="{ backgroundColor: colors[0] }">
+                            <span class="text-white font-medium text-lg">{{ items[0].text }}</span>
+                        </div>
+
+                        <svg v-else viewBox="0 0 100 100" class="w-full h-full transform -rotate-90">
+                            <g v-for="(item, index) in items" :key="index">
+                                <path :d="getSectorPath(index, items.length)" :fill="colors[index % colors.length]" />
+                                <text 
+                                    :x="getTextCoordinates(index, items.length).x" 
+                                    :y="getTextCoordinates(index, items.length).y" 
+                                    fill="white" font-size="4" font-weight="bold" text-anchor="middle" dominant-baseline="middle"
+                                    :transform="`rotate(${getTextRotation(index, items.length)}, ${getTextCoordinates(index, items.length).x}, ${getTextCoordinates(index, items.length).y})`"
+                                >
+                                    {{ truncateText(item.text) }}
+                                </text>
+                            </g>
+                        </svg>
+                    </div>
+                </div>
+
+                <button @click="spinWheel" :disabled="isSpinning || items.length < 2"
+                    class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-lg flex items-center justify-center z-10 transition-transform active:scale-95 disabled:opacity-80 text-morandi-text font-bold tracking-wider text-xs border-4 border-morandi-bg">
+                    <span v-if="!isSpinning">SPIN</span>
+                    <span v-else>...</span>
+                </button>
+            </div>
+        </main>
+
+        <!-- 底部控制區 -->
+        <footer class="flex-none bg-white rounded-t-[30px] shadow-[0_-5px_20px_-5px_rgba(0,0,0,0.05)] z-20 relative overflow-hidden flex flex-col">
+            
+            <div class="w-full flex justify-center pt-3 pb-1 cursor-pointer" @click="toggleInput">
+                <div class="w-10 h-1 bg-gray-200 rounded-full"></div>
+            </div>
+
+            <div class="px-6 pb-2 pt-1 flex justify-between items-center select-none">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-gray-400 tracking-wider uppercase">Options ({{ items.length }})</span>
+                    <button @click="toggleInput" 
+                            class="w-6 h-6 rounded-full bg-morandi-bg flex items-center justify-center text-morandi-text transition-colors">
+                        <svg v-if="isInputExpanded" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+                        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                </div>
+                <button v-if="items.length > 0" @click="items = []" class="text-xs text-red-300 hover:text-red-400 px-2 py-1">Clear</button>
+            </div>
+
+            <div class="grid transition-[grid-template-rows] duration-500 ease-out" :class="isInputExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'">
+                <div class="overflow-hidden min-h-0">
+                    
+                    <div class="px-6 pb-4 flex flex-col gap-3">
+                        <!-- 轉盤標題輸入框 -->
+                        <div class="relative">
+                            <input v-model="wheelTitle" type="text" placeholder="輸入轉盤標題 (例如：晚餐吃什麼？)" 
+                                class="w-full bg-white border-b-2 border-morandi-bg px-2 py-2 outline-none text-sm placeholder-gray-300 text-morandi-accent font-medium focus:border-morandi-accent/30 transition-all">
+                        </div>
+
+                        <!-- 選項輸入區塊 -->
+                        <div class="flex gap-3 items-start">
+                            <div class="flex-1 flex flex-col gap-2">
+                                <input v-model="newItemText" ref="mainInput" @keyup.enter="focusNote" type="text" placeholder="輸入選項..." 
+                                    class="w-full bg-morandi-bg px-5 py-3 rounded-2xl outline-none text-sm text-morandi-text focus:ring-2 focus:ring-morandi-accent/20 transition-all">
+                                <input v-model="newItemNote" ref="noteInput" @keyup.enter="addItem" type="text" placeholder="備註 (選填)" 
+                                    class="w-full bg-morandi-bg/50 px-5 py-2.5 rounded-xl outline-none text-xs text-gray-500 focus:bg-morandi-bg transition-all">
+                            </div>
+                            <button @click="addItem" class="bg-morandi-text text-white w-12 h-[88px] rounded-2xl flex items-center justify-center shadow-lg active:scale-95 transition-all flex-shrink-0">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 選項列表 -->
+                    <div class="overflow-y-auto hide-scrollbar px-6 pb-6 max-h-[140px]">
+                        <div class="flex flex-wrap gap-2 content-start pb-4">
+                            <transition-group name="list">
+                                <div v-for="(item, index) in items" :key="item.id" 
+                                    class="inline-flex items-center px-3 py-1.5 rounded-xl text-sm text-white shadow-sm pr-1"
+                                    :style="{ backgroundColor: colors[index % colors.length] }">
+                                    <div class="flex flex-col leading-none mr-2">
+                                        <span>{{ item.text }}</span>
+                                        <span v-if="item.note" class="text-[8px] opacity-70 mt-0.5 truncate max-w-[60px]">{{ item.note }}</span>
+                                    </div>
+                                    <button @click="removeItem(index)" class="p-1 hover:bg-white/20 rounded-full transition-colors">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                    </button>
+                                </div>
+                            </transition-group>
+                            <div v-if="items.length === 0" @click="isInputExpanded = true"
+                                class="w-full text-center py-6 text-gray-300 text-sm border-2 border-dashed border-gray-100 rounded-xl cursor-pointer hover:border-gray-300 transition-colors">
+                                點擊此處或上方 ＋ 新增選項
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </footer>
+
+        <!-- 結果彈窗 -->
+        <teleport to="body">
+            <transition name="fade">
+                <div v-if="showResultModal" class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center p-4" @click="closeResult">
+                    <transition name="scale" appear>
+                        <div class="bg-white w-full max-w-xs rounded-[30px] p-8 text-center shadow-2xl relative" @click.stop>
+                            <div class="mb-4 inline-flex items-center justify-center w-12 h-12 rounded-full bg-morandi-3/20 text-morandi-3">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                            </div>
+                            
+                            <!-- 彈窗中顯示轉盤標題 -->
+                            <div v-if="wheelTitle" class="text-[10px] font-bold text-morandi-accent tracking-[0.2em] mb-1 uppercase opacity-60">
+                                {{ wheelTitle }}
+                            </div>
+                            <div class="text-xs font-bold text-gray-400 tracking-widest mb-2 uppercase">Result</div>
+                            
+                            <div class="text-3xl font-bold text-morandi-text mb-2 leading-tight">{{ winner?.text }}</div>
+                            <div v-if="winner?.note" class="bg-morandi-bg py-3 px-4 rounded-xl mb-6 mx-2">
+                                <p class="text-sm text-gray-500 font-medium break-words">{{ winner.note }}</p>
+                            </div>
+                            <div v-else class="mb-6"></div>
+                            
+                            <button @click="closeResult" class="bg-morandi-text text-white px-8 py-3 rounded-2xl shadow-lg text-sm font-medium tracking-wide active:scale-95 transition-all w-full">
+                                Confirm
+                            </button>
+                        </div>
+                    </transition>
+                </div>
+            </transition>
+        </teleport>
+
+    </div>
+
+    <script>
+        const { createApp, ref, nextTick, watch } = Vue;
+
+        createApp({
+            setup() {
+                const wheelTitle = ref(''); // 轉盤標題
+                const items = ref([]); 
+                const newItemText = ref('');
+                const newItemNote = ref('');
+                const isSpinning = ref(false);
+                const rotation = ref(0);
+                const winner = ref(null);
+                const showResultModal = ref(false);
+                const isInputExpanded = ref(true); 
+                
+                const mainInput = ref(null);
+                const noteInput = ref(null);
+                const colors = ['#E4C1C1', '#B8C6C3', '#DBC7A8', '#C6B8B8', '#BCC4CC', '#D4C4B7'];
+
+                const toggleInput = () => isInputExpanded.value = !isInputExpanded.value;
+                const focusNote = () => newItemText.value.trim() && noteInput.value.focus();
+
+                const addItem = () => {
+                    const text = newItemText.value.trim();
+                    if (text) {
+                        items.value.push({ id: Date.now(), text, note: newItemNote.value.trim() });
+                        newItemText.value = ''; newItemNote.value = '';
+                        nextTick(() => mainInput.value.focus());
+                    }
+                };
+
+                const removeItem = (index) => !isSpinning.value && items.value.splice(index, 1);
+
+                const spinWheel = () => {
+                    if (items.value.length < 2 || isSpinning.value) return;
+                    isInputExpanded.value = false;
+                    isSpinning.value = true;
+                    showResultModal.value = false;
+                    
+                    const totalDegrees = (5 * 360) + Math.floor(Math.random() * 360);
+                    rotation.value += totalDegrees;
+
+                    setTimeout(() => {
+                        isSpinning.value = false;
+                        const sliceAngle = 360 / items.value.length;
+                        const actualDegree = rotation.value % 360; 
+                        const index = Math.floor(((360 - actualDegree) % 360) / sliceAngle);
+                        winner.value = items.value[index];
+                        showResultModal.value = true;
+                    }, 5000); 
+                };
+
+                const closeResult = () => showResultModal.value = false;
+
+                watch(() => items.value.length, (newVal) => { if (newVal === 0) isInputExpanded.value = true; });
+
+                const getSectorPath = (index, total) => {
+                    const startAngle = (index * 360) / total;
+                    const endAngle = ((index + 1) * 360) / total;
+                    const rad1 = startAngle * Math.PI / 180;
+                    const rad2 = endAngle * Math.PI / 180;
+                    return `M 50 50 L ${50 + 50 * Math.cos(rad1)} ${50 + 50 * Math.sin(rad1)} A 50 50 0 ${endAngle - startAngle <= 180 ? "0" : "1"} 1 ${50 + 50 * Math.cos(rad2)} ${50 + 50 * Math.sin(rad2)} Z`;
+                };
+
+                const getTextCoordinates = (index, total) => {
+                    const rad = ((index * 360) / total + (180 / total)) * Math.PI / 180;
+                    return { x: 50 + 32 * Math.cos(rad), y: 50 + 32 * Math.sin(rad) };
+                };
+
+                const getTextRotation = (index, total) => (index * 360) / total + (180 / total);
+                const truncateText = (text) => text.length > 6 ? text.substring(0, 5) + '..' : text;
+
+                return {
+                    wheelTitle, items, newItemText, newItemNote, isSpinning, rotation, winner, showResultModal, isInputExpanded,
+                    colors, mainInput, noteInput, addItem, removeItem, spinWheel, closeResult, focusNote, toggleInput,
+                    getSectorPath, getTextCoordinates, getTextRotation, truncateText
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
